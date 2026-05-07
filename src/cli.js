@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { V16Engine } from "./engine/V16Engine.js";
 
@@ -14,11 +15,13 @@ async function main() {
 
   const engine = new V16Engine();
   const result = await engine.execute(source);
-
-  console.log("--- V16 Pipeline Metrics ---");
-  console.log(JSON.stringify(result.stages, null, 2));
-  console.log("--- Runtime Env ---");
-  console.log(JSON.stringify(result.runtime.env, null, 2));
+  if (process.argv.includes("--debug") || process.argv.includes("-d")) {
+    console.log("--- V16 Pipeline Metrics ---");
+    console.log(JSON.stringify(result.stages, null, 2));
+    console.log("--- Runtime Env ---");
+    console.log(JSON.stringify(result.runtime.env, null, 2));
+  }
+  
 }
 
 main().catch((error) => {

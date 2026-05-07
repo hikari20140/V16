@@ -1,0 +1,1 @@
+console.log("This is the V16 CLI. Use 'v16 --help' for usage instructions.");

@@ -12,7 +12,8 @@ export class V16Engine {
       chunkSize = 96,
       logger = console.log,
       modules = {},
-      moduleName = "main"
+      moduleName = "main",
+      globals = {}
     } = options;
 
     const pipelineStarted = Date.now();
@@ -28,7 +29,7 @@ export class V16Engine {
 
     const runStarted = Date.now();
     const stream = bufferToStream(jitResult.binary, chunkSize);
-    const vm = new BytecodeVM({ logger, modules, moduleName });
+    const vm = new BytecodeVM({ logger, modules, moduleName, globals });
     const runtime = await runBinaryStream(stream, vm);
     const runElapsedMs = Date.now() - runStarted;
 

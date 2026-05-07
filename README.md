@@ -1,42 +1,55 @@
 # V16
 
-V16 is a JavaScript execution engine prototype with a four-stage pipeline:
+V16 is a JavaScript execution engine prototype with this pipeline:
 
 1. Parse
 2. Tree
 3. JIT Compile
 4. Run
 
-## Architecture
-
-- `Parse` and `Tree` run in parallel worker threads.
-- `JIT Compile` transforms AST into V16 bytecode.
-- `Run` executes bytecode from a stream-powered VM.
-
 ## Grammar Subset
 
 - Declarations: `var`, `let`, `const`
-- Control flow: `if / else`, `while`
-- Functions: `function` declaration + `return`
-- Module syntax: `import`, `export`, `export default`
+- Functions:
+  - `function` declaration
+  - anonymous function expression
+  - arrow function expression
+  - closure capture (lexical scope)
+- Control flow:
+  - `if / else`
+  - `while`
+  - `for`
+  - `break`, `continue`
+- Module syntax:
+  - `import`, `export`, `export default`
 - Expressions:
-  - literals: number/string/boolean/null
   - arithmetic: `+ - * /`
-  - comparisons: `< > <= >= == !=`
+  - compare: `< > <= >= == !=`
+  - logical: `&& ||`
   - unary: `- !`
-  - assignment and calls (`print`, `console.log`, user functions)
+  - assignment, member access, call
 
 ## JIT Optimizations
 
-- Constant folding (`2 * 3` -> `6`)
+- Constant folding
 - Pure expression elimination
-- Dead branch pruning (`if (false) ...`)
-- Dead loop removal (`while(false) ...`)
-- Block-aware compilation via Tree metadata (`BLOCK_HINT`)
+- Dead branch/loop pruning
+- Block CSE (common subexpression reuse inside block)
+- Tree-guided LICM on loop test invariants
 
-## API
+## CLI Input Integration
 
-See: `v16-api.document`
+- Inject external globals to script:
+  - `input`
+  - `document`
+  - `v16doc`
+- Options:
+  - `--html <file>`
+  - `--input-json '<json>'`
+  - `--input-file <file>`
+  - `--debug`
+
+See [v16-api.document](/Users/tomonori/Documents/GitHub/V16/v16-api.document) for details.
 
 ## Quick Start
 
@@ -45,8 +58,8 @@ npm test
 npm start
 ```
 
-Run your own source file:
+Run your own script:
 
 ```bash
-npm start ./example.js
+npm start ./example.js -- --debug
 ```

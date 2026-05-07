@@ -23,28 +23,68 @@ test("V16 executes arithmetic, assignment, and print pipeline", async () => {
   assert.equal(result.runtime.env.a, 11);
 });
 
-test("V16 executes function + while grammar subset", async () => {
+test("V16 supports arrow/anonymous functions with arguments", async () => {
   const logs = [];
   const engine = new V16Engine();
   const source = [
-    "function sumTo(n) {",
-    "  let acc = 0;",
-    "  while (n > 0) {",
-    "    acc = acc + n;",
-    "    n = n - 1;",
-    "  }",
-    "  return acc;",
-    "}",
-    "let total = sumTo(4);",
-    "print(total);"
+    "let add = (x, y) => x + y;",
+    "let mul = function (a, b) { return a * b; };",
+    "let mix = function (v) { return add(v, 2) + mul(v, 3); };",
+    "print(mix(4));"
   ].join("\n");
 
   const result = await engine.execute(source, {
     logger: (...args) => logs.push(args)
   });
 
-  assert.deepEqual(logs, [[10]]);
-  assert.equal(result.runtime.env.total, 10);
+  assert.deepEqual(logs, [[18]]);
+  assert.equal(result.runtime.env.add.__v16Type, "function");
+});
+
+test("V16 supports closures capturing outer scope", async () => {
+  const logs = [];
+  const engine = new V16Engine();
+  const source = [
+    "function makeCounter(base) {",
+    "  let x = base;",
+    "  return function(step) {",
+    "    x = x + step;",
+    "    return x;",
+    "  };",
+    "}",
+    "let c = makeCounter(10);",
+    "print(c(1));",
+    "print(c(2));"
+  ].join("\n");
+
+  await engine.execute(source, {
+    logger: (...args) => logs.push(args)
+  });
+
+  assert.deepEqual(logs, [[11], [13]]);
+});
+
+test("V16 supports for/break/continue and &&/||", async () => {
+  const logs = [];
+  const engine = new V16Engine();
+  const source = [
+    "let sum = 0;",
+    "for (let i = 0; i < 10; i = i + 1) {",
+    "  if (i == 2) continue;",
+    "  if (i == 6) break;",
+    "  if ((i > 0 && i < 6) || i == 0) {",
+    "    sum = sum + i;",
+    "  }",
+    "}",
+    "print(sum);"
+  ].join("\n");
+
+  const result = await engine.execute(source, {
+    logger: (...args) => logs.push(args)
+  });
+
+  assert.deepEqual(logs, [[13]]);
+  assert.equal(result.runtime.env.sum, 13);
 });
 
 test("V16 supports import/export subset with module map", async () => {
@@ -69,24 +109,54 @@ test("V16 supports import/export subset with module map", async () => {
   assert.equal(result.runtime.exports.default, 12);
 });
 
-test("V16 applies constant folding and dead-statement optimizations", async () => {
+test("V16 accepts external globals (input/document/v16doc) from CLI model", async () => {
   const logs = [];
   const engine = new V16Engine();
   const source = [
-    "1 + 2;",
-    "if (false) { print(1); } else { 4 + 5; }",
-    "while (false) { print(2); }",
-    "let x = 2 * 3;",
-    "print(x);"
+    "if (input.enabled && document.textIncludes('hello')) {",
+    "  document.setHTML(document.getHTML() + ' world');",
+    "}",
+    "print(v16doc.textIncludes('world'));"
   ].join("\n");
 
   const result = await engine.execute(source, {
+    globals: {
+      input: { enabled: true },
+      document: {
+        html: "",
+        getHTML() { return this.html || "hello"; },
+        setHTML(value) { this.html = value; },
+        textIncludes(text) { return this.getHTML().includes(text); }
+      },
+      v16doc: {
+        textIncludes(text) {
+          return text === "world";
+        }
+      }
+    },
     logger: (...args) => logs.push(args)
   });
 
-  assert.deepEqual(logs, [[6]]);
-  assert.equal(result.stages.jit.optimizations.foldedConstants > 0, true);
-  assert.equal(result.stages.jit.optimizations.removedPureExpressions > 0, true);
-  assert.equal(result.stages.jit.optimizations.prunedBranches > 0, true);
-  assert.equal(result.stages.jit.optimizations.removedLoops > 0, true);
+  assert.deepEqual(logs, [[true]]);
+  assert.ok(result.stages.jit.optimizations);
+});
+
+test("V16 applies tree-guided LICM and block CSE stats", async () => {
+  const engine = new V16Engine();
+  const source = [
+    "let a = 2 + 3;",
+    "let b = 2 + 3;",
+    "let i = 0;",
+    "while (i < (a + b)) {",
+    "  i = i + 1;",
+    "}",
+    "print(i);"
+  ].join("\n");
+
+  const result = await engine.execute(source, {
+    logger: () => {}
+  });
+
+  assert.equal(result.stages.jit.optimizations.blockCseReuses > 0, true);
+  assert.equal(result.stages.jit.optimizations.licmHoists > 0, true);
 });

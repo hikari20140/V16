@@ -1,6 +1,6 @@
 import { tokenize } from "./simpleParser.js";
 
-const CONTROL_BLOCK_KEYWORDS = new Set(["if", "while", "function"]);
+const CONTROL_BLOCK_KEYWORDS = new Set(["if", "while", "for", "function"]);
 
 export function buildExecutionTree(source) {
   const tokens = tokenize(source);
@@ -21,10 +21,22 @@ export function buildExecutionTree(source) {
   const diagnostics = [];
   let nextBlockId = 1;
   let pendingBlockKind = null;
+  let pendingParenDepth = 0;
 
   for (const token of tokens) {
     if (token.type === "keyword" && CONTROL_BLOCK_KEYWORDS.has(token.value)) {
       pendingBlockKind = token.value;
+      pendingParenDepth = 0;
+      continue;
+    }
+
+    if (pendingBlockKind && token.type === "punctuator" && token.value === "(") {
+      pendingParenDepth += 1;
+      continue;
+    }
+
+    if (pendingBlockKind && token.type === "punctuator" && token.value === ")") {
+      pendingParenDepth = Math.max(0, pendingParenDepth - 1);
       continue;
     }
 
@@ -33,7 +45,7 @@ export function buildExecutionTree(source) {
       const block = {
         id: nextBlockId,
         type: "Block",
-        kind: pendingBlockKind ?? "block",
+        kind: pendingParenDepth === 0 ? pendingBlockKind ?? "block" : "block",
         start: token.start,
         end: null,
         depth: stack.length,
@@ -46,6 +58,7 @@ export function buildExecutionTree(source) {
       blockTable.push(block);
       stack.push(block);
       pendingBlockKind = null;
+      pendingParenDepth = 0;
       continue;
     }
 
@@ -57,17 +70,16 @@ export function buildExecutionTree(source) {
       const closed = stack.pop();
       closed.end = token.end;
       pendingBlockKind = null;
+      pendingParenDepth = 0;
       continue;
     }
 
     if (token.type === "punctuator" && token.value === ";") {
       const current = stack[stack.length - 1];
       current.statementCount += 1;
-      continue;
-    }
-
-    if (token.type !== "keyword") {
       pendingBlockKind = null;
+      pendingParenDepth = 0;
+      continue;
     }
   }
 
@@ -87,7 +99,7 @@ export function buildExecutionTree(source) {
     diagnostics,
     metrics: {
       blockCount: blockTable.length - 1,
-      loopBlockCount: blockTable.filter((b) => b.kind === "while").length,
+      loopBlockCount: blockTable.filter((b) => b.kind === "while" || b.kind === "for").length,
       functionBlockCount: blockTable.filter((b) => b.kind === "function").length,
       statementCount: blockTable.reduce((sum, block) => sum + block.statementCount, 0),
       maxDepth: Math.max(...blockTable.map((b) => b.depth))

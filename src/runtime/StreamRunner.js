@@ -1,53 +1,94 @@
 import { once } from "node:events";
 
+class Environment {
+  constructor(parent = null, kind = "block") {
+    this.parent = parent;
+    this.kind = kind;
+    this.bindings = new Map();
+  }
+}
+
 export class BytecodeVM {
-  constructor({ logger = console.log, modules = {}, moduleName = "main" } = {}) {
+  constructor({ logger = console.log, modules = {}, moduleName = "main", globals = {} } = {}) {
     this.logger = logger;
     this.modules = modules;
     this.moduleName = moduleName;
     this.moduleExports = {};
-    this.functions = new Map();
     this.outputs = [];
-    this.stack = [];
-    this.scopes = [{ kind: "global", bindings: new Map() }];
+
+    this.globalEnv = new Environment(null, "global");
+    this.globalEnv.bindings.set("print", (...args) => {
+      this.outputs.push(args);
+      this.logger(...args);
+      return null;
+    });
+    this.globalEnv.bindings.set("console", {
+      log: (...args) => {
+        this.outputs.push(args);
+        this.logger(...args);
+        return null;
+      }
+    });
+    for (const [name, value] of Object.entries(globals)) {
+      this.globalEnv.bindings.set(name, value);
+    }
+
+    this.lastBlockHint = null;
   }
 
   run(instructions) {
-    this.executeInstructions(instructions);
+    const frame = {
+      stack: [],
+      env: this.globalEnv,
+      ip: 0,
+      instructions,
+      returned: false,
+      returnValue: undefined
+    };
+
+    this.executeFrame(frame);
+
     return {
-      env: this.snapshotGlobalBindings(),
+      env: Object.fromEntries(this.globalEnv.bindings.entries()),
       outputs: this.outputs,
-      exports: this.moduleExports
+      exports: this.moduleExports,
+      lastBlockHint: this.lastBlockHint
     };
   }
 
-  executeInstructions(instructions) {
-    let ip = 0;
-
-    while (ip < instructions.length) {
-      const instruction = instructions[ip];
+  executeFrame(frame) {
+    while (frame.ip < frame.instructions.length) {
+      const instruction = frame.instructions[frame.ip];
 
       switch (instruction.op) {
         case "BLOCK_HINT":
+          this.lastBlockHint = instruction;
           break;
         case "ENTER_SCOPE":
-          this.enterScope(instruction.kind ?? "block");
+          frame.env = new Environment(frame.env, instruction.kind ?? "block");
           break;
         case "EXIT_SCOPE":
-          this.exitScope();
+          if (frame.env.parent) {
+            frame.env = frame.env.parent;
+          }
           break;
         case "DECLARE":
-          this.declare(instruction.name, instruction.kind);
+          this.declareBinding(frame.env, instruction.name, instruction.kind ?? "let");
           break;
         case "PUSH_CONST":
-          this.stack.push(instruction.value);
+          frame.stack.push(instruction.value);
           break;
         case "LOAD":
-          this.stack.push(this.lookup(instruction.name));
+          frame.stack.push(this.lookupBinding(frame.env, instruction.name));
           break;
         case "STORE": {
-          const value = this.stack.pop();
-          this.assign(instruction.name, value);
+          const value = frame.stack.pop();
+          this.assignBinding(frame.env, instruction.name, value);
+          break;
+        }
+        case "GET_PROP": {
+          const obj = frame.stack.pop();
+          frame.stack.push(obj?.[instruction.property]);
           break;
         }
         case "ADD":
@@ -60,151 +101,145 @@ export class BytecodeVM {
         case "GTE":
         case "EQ":
         case "NEQ": {
-          const right = this.stack.pop();
-          const left = this.stack.pop();
-          this.stack.push(executeBinary(instruction.op, left, right));
+          const right = frame.stack.pop();
+          const left = frame.stack.pop();
+          frame.stack.push(executeBinary(instruction.op, left, right));
           break;
         }
         case "NEG": {
-          const value = this.stack.pop();
-          this.stack.push(-value);
+          const value = frame.stack.pop();
+          frame.stack.push(-value);
           break;
         }
         case "NOT": {
-          const value = this.stack.pop();
-          this.stack.push(!value);
+          const value = frame.stack.pop();
+          frame.stack.push(!value);
           break;
         }
         case "DROP":
-          this.stack.pop();
+          frame.stack.pop();
           break;
+        case "DUP": {
+          const value = frame.stack[frame.stack.length - 1];
+          frame.stack.push(value);
+          break;
+        }
         case "JMP":
-          ip = instruction.target;
+          frame.ip = instruction.target;
           continue;
         case "JMP_IF_FALSE": {
-          const condition = this.stack.pop();
-          if (!condition) {
-            ip = instruction.target;
+          const value = frame.stack.pop();
+          if (!value) {
+            frame.ip = instruction.target;
             continue;
           }
           break;
         }
         case "PRINT": {
-          const argc = instruction.argc ?? 0;
-          const args = [];
-          for (let i = 0; i < argc; i += 1) {
-            args.push(this.stack.pop());
-          }
-          args.reverse();
+          const args = popArgs(frame.stack, instruction.argc ?? 0);
           this.outputs.push(args);
           this.logger(...args);
           if (!instruction.discardResult) {
-            this.stack.push(null);
+            frame.stack.push(null);
           }
           break;
         }
-        case "REGISTER_FUNC":
-          this.registerFunction(instruction.name, instruction.params, instruction.body);
+        case "MAKE_FUNCTION": {
+          const value = {
+            __v16Type: "function",
+            name: instruction.name,
+            params: instruction.params,
+            body: instruction.body,
+            closure: frame.env
+          };
+          frame.stack.push(value);
           break;
-        case "CALL": {
-          const argc = instruction.argc ?? 0;
-          const args = [];
-          for (let i = 0; i < argc; i += 1) {
-            args.push(this.stack.pop());
-          }
-          args.reverse();
-          const value = this.call(instruction.callee, args);
+        }
+        case "CALL_DYNAMIC": {
+          const callee = frame.stack.pop();
+          const args = popArgs(frame.stack, instruction.argc ?? 0);
+          const result = this.callValue(callee, args);
           if (!instruction.discardResult) {
-            this.stack.push(value);
+            frame.stack.push(result);
           }
           break;
         }
-        case "RET": {
-          const value = this.stack.pop();
-          return { returned: true, value };
+        case "CALL_MEMBER": {
+          const target = frame.stack.pop();
+          const args = popArgs(frame.stack, instruction.argc ?? 0);
+          const method = target?.[instruction.property];
+          if (typeof method !== "function") {
+            throw new Error(`Method ${instruction.property} is not callable.`);
+          }
+          const result = method.apply(target, args);
+          if (!instruction.discardResult) {
+            frame.stack.push(result);
+          }
+          break;
         }
+        case "RET":
+          frame.returned = true;
+          frame.returnValue = frame.stack.pop();
+          return;
         case "IMPORT":
-          this.applyImport(instruction.source, instruction.specifiers ?? []);
+          this.applyImport(frame.env, instruction.source, instruction.specifiers ?? []);
           break;
         case "EXPORT":
-          this.moduleExports[instruction.exported] = this.lookup(instruction.local);
+          this.moduleExports[instruction.exported] = this.lookupBinding(frame.env, instruction.local);
           break;
-        case "EXPORT_VALUE": {
-          const value = this.stack.pop();
-          this.moduleExports[instruction.exported] = value;
+        case "EXPORT_VALUE":
+          this.moduleExports[instruction.exported] = frame.stack.pop();
           break;
-        }
         default:
           throw new Error(`Unknown opcode: ${instruction.op}`);
       }
 
-      ip += 1;
+      frame.ip += 1;
     }
-
-    return { returned: false, value: undefined };
   }
 
-  registerFunction(name, params, body) {
-    this.functions.set(name, { params, body });
-    this.declare(name, "var");
-    this.assign(name, { __v16Function: name });
+  callValue(callee, args) {
+    if (callee && callee.__v16Type === "function") {
+      return this.callUserFunction(callee, args);
+    }
+
+    if (typeof callee === "function") {
+      return callee(...args);
+    }
+
+    if (callee === undefined || callee === null) {
+      throw new Error("Attempted to call undefined/null.");
+    }
+
+    throw new Error("Unsupported callable value in CALL_DYNAMIC.");
   }
 
-  call(callee, args) {
-    if (callee === "print" || callee === "console.log") {
-      this.outputs.push(args);
-      this.logger(...args);
-      return null;
+  callUserFunction(callee, args) {
+    const localEnv = new Environment(callee.closure, "function");
+
+    if (callee.name) {
+      localEnv.bindings.set(callee.name, callee);
     }
 
-    if (this.functions.has(callee)) {
-      return this.executeFunction(callee, args);
+    for (let i = 0; i < callee.params.length; i += 1) {
+      const name = callee.params[i];
+      localEnv.bindings.set(name, args[i]);
     }
 
-    const direct = this.lookup(callee);
-    if (direct && typeof direct === "object" && direct.__v16Function && this.functions.has(direct.__v16Function)) {
-      return this.executeFunction(direct.__v16Function, args);
-    }
+    const frame = {
+      stack: [],
+      env: localEnv,
+      ip: 0,
+      instructions: callee.body,
+      returned: false,
+      returnValue: undefined
+    };
 
-    if (typeof direct === "function") {
-      return direct(...args);
-    }
-
-    if (callee.includes(".")) {
-      const [root, ...rest] = callee.split(".");
-      let target = this.lookup(root);
-      for (const part of rest.slice(0, -1)) {
-        target = target?.[part];
-      }
-      const method = rest[rest.length - 1];
-      if (target && typeof target[method] === "function") {
-        return target[method](...args);
-      }
-    }
-
-    throw new Error(`Undefined function call: ${callee}`);
+    this.executeFrame(frame);
+    return frame.returned ? frame.returnValue : undefined;
   }
 
-  executeFunction(name, args) {
-    const func = this.functions.get(name);
-    if (!func) {
-      throw new Error(`Unknown function: ${name}`);
-    }
-
-    this.enterScope("function");
-    for (let i = 0; i < func.params.length; i += 1) {
-      const paramName = func.params[i];
-      this.declare(paramName, "let");
-      this.assign(paramName, args[i]);
-    }
-
-    const result = this.executeInstructions(func.body);
-    this.exitScope();
-
-    return result.returned ? result.value : undefined;
-  }
-
-  applyImport(source, specifiers) {
+  applyImport(env, source, specifiers) {
     const moduleRecord = this.modules[source] ?? {};
 
     for (const specifier of specifiers) {
@@ -214,72 +249,65 @@ export class BytecodeVM {
       } else {
         value = moduleRecord[specifier.imported];
       }
-      this.declare(specifier.local, "const");
-      this.assign(specifier.local, value);
+      this.declareBinding(env, specifier.local, "const");
+      this.assignBinding(env, specifier.local, value);
     }
   }
 
-  enterScope(kind) {
-    this.scopes.push({ kind, bindings: new Map() });
-  }
-
-  exitScope() {
-    if (this.scopes.length > 1) {
-      this.scopes.pop();
+  declareBinding(env, name, kind) {
+    const target = kind === "var" ? this.findNearestFunctionScope(env) : env;
+    if (!target.bindings.has(name)) {
+      target.bindings.set(name, undefined);
     }
   }
 
-  declare(name, kind = "let") {
-    const targetScope = kind === "var" ? this.findNearestFunctionScope() : this.currentScope();
-    if (!targetScope.bindings.has(name)) {
-      targetScope.bindings.set(name, undefined);
-    }
-  }
-
-  assign(name, value) {
-    const scope = this.findScopeContaining(name);
-    if (scope) {
-      scope.bindings.set(name, value);
+  assignBinding(env, name, value) {
+    const target = this.resolveScope(env, name);
+    if (target) {
+      target.bindings.set(name, value);
       return;
     }
-    this.scopes[0].bindings.set(name, value);
+    this.globalEnv.bindings.set(name, value);
   }
 
-  lookup(name) {
-    const scope = this.findScopeContaining(name);
-    if (scope) {
-      return scope.bindings.get(name);
+  lookupBinding(env, name) {
+    const target = this.resolveScope(env, name);
+    if (target) {
+      return target.bindings.get(name);
     }
     return undefined;
   }
 
-  currentScope() {
-    return this.scopes[this.scopes.length - 1];
-  }
-
-  findNearestFunctionScope() {
-    for (let i = this.scopes.length - 1; i >= 0; i -= 1) {
-      const scope = this.scopes[i];
-      if (scope.kind === "function" || scope.kind === "global") {
-        return scope;
+  resolveScope(env, name) {
+    let current = env;
+    while (current) {
+      if (current.bindings.has(name)) {
+        return current;
       }
-    }
-    return this.scopes[0];
-  }
-
-  findScopeContaining(name) {
-    for (let i = this.scopes.length - 1; i >= 0; i -= 1) {
-      const scope = this.scopes[i];
-      if (scope.bindings.has(name)) {
-        return scope;
-      }
+      current = current.parent;
     }
     return null;
   }
 
-  snapshotGlobalBindings() {
-    return Object.fromEntries(this.scopes[0].bindings.entries());
+  findNearestFunctionScope(env) {
+    let current = env;
+    while (current) {
+      if (current.kind === "function" || current.kind === "global") {
+        return current;
+      }
+      current = current.parent;
+    }
+    return this.globalEnv;
   }
+}
+
+function popArgs(stack, argc) {
+  const args = [];
+  for (let i = 0; i < argc; i += 1) {
+    args.push(stack.pop());
+  }
+  args.reverse();
+  return args;
 }
 
 function executeBinary(op, left, right) {

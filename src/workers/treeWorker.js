@@ -10,7 +10,8 @@ function run() {
     tree,
     meta: {
       stage: "tree",
-      elapsedMs: Date.now() - startedAt
+      elapsedMs: Date.now() - startedAt,
+      ...tree.metrics
     }
   });
 }

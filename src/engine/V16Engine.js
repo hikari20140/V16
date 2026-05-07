@@ -8,7 +8,13 @@ const TREE_WORKER = new URL("../workers/treeWorker.js", import.meta.url);
 
 export class V16Engine {
   async execute(source, options = {}) {
-    const { chunkSize = 96, logger = console.log } = options;
+    const {
+      chunkSize = 96,
+      logger = console.log,
+      modules = {},
+      moduleName = "main"
+    } = options;
+
     const pipelineStarted = Date.now();
 
     const [parseResult, treeResult] = await Promise.all([
@@ -22,7 +28,7 @@ export class V16Engine {
 
     const runStarted = Date.now();
     const stream = bufferToStream(jitResult.binary, chunkSize);
-    const vm = new BytecodeVM({ logger });
+    const vm = new BytecodeVM({ logger, modules, moduleName });
     const runtime = await runBinaryStream(stream, vm);
     const runElapsedMs = Date.now() - runStarted;
 

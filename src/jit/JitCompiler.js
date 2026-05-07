@@ -359,6 +359,9 @@ function compileExpression(node, out, state, options = { emitResult: true }) {
     case "MemberExpression":
       compileMemberExpression(node, out, state, emitResult);
       return;
+    case "TemplateLiteral":
+      compileTemplateLiteral(node, out, state, emitResult);
+      return;
     case "AssignmentExpression":
       compileExpression(node.right, out, state, { emitResult: true });
       out.push({ op: "STORE", name: node.left.name });
@@ -456,6 +459,31 @@ function compileFunctionExpression(node, out, state, emitResult) {
 
   if (node.type === "ArrowFunctionExpression" && node.expression) {
     // handled by compileFunctionLike using expression body path
+  }
+
+  if (!emitResult) {
+    out.push({ op: "DROP" });
+  }
+}
+
+function compileTemplateLiteral(node, out, state, emitResult) {
+  const quasis = node.quasis ?? [];
+  const expressions = node.expressions ?? [];
+
+  if (quasis.length === 0) {
+    if (emitResult) {
+      out.push({ op: "PUSH_CONST", value: "" });
+    }
+    return;
+  }
+
+  out.push({ op: "PUSH_CONST", value: quasis[0].value ?? "" });
+
+  for (let i = 0; i < expressions.length; i += 1) {
+    compileExpression(expressions[i], out, state, { emitResult: true });
+    out.push({ op: "ADD" });
+    out.push({ op: "PUSH_CONST", value: quasis[i + 1]?.value ?? "" });
+    out.push({ op: "ADD" });
   }
 
   if (!emitResult) {
@@ -867,6 +895,20 @@ function optimizeExpression(expression, stats) {
       }
       return { ...expression, left, right };
     }
+    case "TemplateLiteral": {
+      const expressions = expression.expressions.map((expr) => optimizeExpression(expr, stats));
+      const quasis = expression.quasis;
+      if (expressions.every((expr) => expr.type === "Literal")) {
+        stats.foldedConstants += 1;
+        return {
+          type: "Literal",
+          value: evaluateTemplateLiteral(quasis, expressions),
+          start: expression.start,
+          end: expression.end
+        };
+      }
+      return { ...expression, expressions, quasis };
+    }
     case "AssignmentExpression":
       return {
         ...expression,
@@ -919,6 +961,15 @@ function evaluateBinary(operator, left, right) {
     default:
       throw new Error(`Unsupported binary operator in optimizer: ${operator}`);
   }
+}
+
+function evaluateTemplateLiteral(quasis, expressions) {
+  let result = String(quasis[0]?.value ?? "");
+  for (let i = 0; i < expressions.length; i += 1) {
+    result += String(expressions[i].value);
+    result += String(quasis[i + 1]?.value ?? "");
+  }
+  return result;
 }
 
 function createBlockResolver(treeInfo = null) {
@@ -974,6 +1025,11 @@ function collectIdentifiers(node, out = new Set()) {
       collectIdentifiers(node.callee, out);
       for (const arg of node.arguments) {
         collectIdentifiers(arg, out);
+      }
+      return out;
+    case "TemplateLiteral":
+      for (const expr of node.expressions) {
+        collectIdentifiers(expr, out);
       }
       return out;
     default:
@@ -1103,6 +1159,8 @@ function isPureExpression(expression) {
       return isPureExpression(expression.left) && isPureExpression(expression.right);
     case "MemberExpression":
       return isPureExpression(expression.object);
+    case "TemplateLiteral":
+      return expression.expressions.every((expr) => isPureExpression(expr));
     case "FunctionExpression":
     case "ArrowFunctionExpression":
       return true;

@@ -23,6 +23,24 @@ test("V16 executes arithmetic, assignment, and print pipeline", async () => {
   assert.equal(result.runtime.env.a, 11);
 });
 
+test("V16 supports template literals with interpolation", async () => {
+  const logs = [];
+  const engine = new V16Engine();
+  const source = [
+    "let name = 'V16';",
+    "let score = 40 + 2;",
+    "let msg = `engine:${name}, score=${score}`;",
+    "print(msg);"
+  ].join("\n");
+
+  const result = await engine.execute(source, {
+    logger: (...args) => logs.push(args)
+  });
+
+  assert.deepEqual(logs, [["engine:V16, score=42"]]);
+  assert.equal(result.runtime.env.msg, "engine:V16, score=42");
+});
+
 test("V16 supports arrow/anonymous functions with arguments", async () => {
   const logs = [];
   const engine = new V16Engine();

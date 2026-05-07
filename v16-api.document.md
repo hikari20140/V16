@@ -1,44 +1,36 @@
-V16 API Document
+V16 API Document (CLI Document/Input Integration)
 
-1) Engine Entry Point
-- class: V16Engine
-- method: async execute(source, options?)
+1) CLI to Runtime Injection
+- input: `--input-json` or `--input-file` で渡された JSON オブジェクト
+- document: HTML document 操作用の簡易オブジェクト
+- v16doc: documentユーティリティAPI本体
 
-2) execute options
-- chunkSize: number (default: 96)
-- logger: (...args) => void (default: console.log)
-- modules: Record<string, Record<string, unknown>>
-- moduleName: string (default: "main")
+2) CLI Options
+- `node src/cli.js <script.js>`
+- `--html <path>`: HTMLファイルを読み込み document/v16doc に注入
+- `--input-json '{"key":1}'`: JSON文字列を input として注入
+- `--input-file <path>`: JSONファイルを input として注入
+- `--debug` / `-d`: stages/env/exports を表示
 
-3) Grammar subset (current)
-- Variable declarations: var / let / const
-- Function declaration and return
-- If / else
-- While
-- Import / export
-  - import defaultExport from "mod"
-  - import { a, b as c } from "mod"
-  - import * as ns from "mod"
-  - export const x = ...
-  - export function f() {}
-  - export { x as y }
-  - export default expression
-- Expressions
-  - literals: number / string / true / false / null
-  - arithmetic: + - * /
-  - compare: < > <= >= == !=
-  - unary: - !
-  - assignment: a = ...
-  - call: print(...), console.log(...), user-defined function calls
+3) Script-side Globals
+- `input`
+  - 任意JSON値
+- `document`
+  - `document.getHTML()`
+  - `document.setHTML(html)`
+  - `document.textIncludes(text)`
+  - `document.findByTag(tagName)`
+- `v16doc`
+  - `v16doc.bind(documentLike)`
+  - `v16doc.getDocument()`
+  - `v16doc.hasDocument()`
+  - `v16doc.getHTML()`
+  - `v16doc.setHTML(html)`
+  - `v16doc.textIncludes(text)`
+  - `v16doc.findByTag(tagName)`
+  - `v16doc.replaceText(search, replace)`
+  - `v16doc.appendHTML(fragment)`
 
-4) Runtime result shape
-- runtime.env: global binding snapshot
-- runtime.outputs: list of printed argument arrays
-- runtime.exports: module export object
-- stages: parse / tree / jit / run metrics
-- artifacts: tokens / ast / tree / instructions
-
-5) Pipeline
-- Parse and Tree run in parallel worker threads
-- JIT compiles AST to V16 bytecode
-- bytecode is streamed and executed by VM
+4) Notes
+- 本document APIはV16ランタイム上でHTMLを扱うための軽量実装です。
+- ブラウザDOM完全互換ではなく、CLIで渡したHTML文字列操作を主用途とします。

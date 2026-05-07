@@ -26,6 +26,7 @@ V16 is a JavaScript execution engine prototype with this pipeline:
   - arithmetic: `+ - * /`
   - compare: `< > <= >= == !=`
   - logical: `&& ||`
+  - template literals: `` `...` ``, `` `${...}` ``
   - unary: `- !`
   - assignment, member access, call
 

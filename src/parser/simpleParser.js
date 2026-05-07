@@ -92,6 +92,39 @@ export function tokenize(source) {
       continue;
     }
 
+    if (char === "`") {
+      const start = i;
+      i += 1;
+      let value = "";
+
+      while (i < source.length) {
+        const current = source[i];
+        if (current === "\\") {
+          if (i + 1 >= source.length) {
+            throw new SyntaxError("Unterminated template literal.");
+          }
+          value += source[i];
+          value += source[i + 1];
+          i += 2;
+          continue;
+        }
+
+        if (current === "`") {
+          i += 1;
+          tokens.push({ type: "template", value, start, end: i });
+          break;
+        }
+
+        value += current;
+        i += 1;
+      }
+
+      if (i >= source.length && source[source.length - 1] !== "`") {
+        throw new SyntaxError("Unterminated template literal.");
+      }
+      continue;
+    }
+
     if (isDigit(char)) {
       const start = i;
       let value = char;
@@ -844,6 +877,11 @@ class Parser {
       return { type: "Literal", value: token.value, start: token.start, end: token.end };
     }
 
+    if (this.match("template")) {
+      const token = this.consume();
+      return this.parseTemplateLiteral(token);
+    }
+
     if (this.match("keyword", "true") || this.match("keyword", "false") || this.match("keyword", "null")) {
       const token = this.consume();
       const value = token.value === "true" ? true : token.value === "false" ? false : null;
@@ -874,6 +912,18 @@ class Parser {
     throw new SyntaxError(`Unexpected token ${got} in expression.`);
   }
 
+  parseTemplateLiteral(token) {
+    const parts = splitTemplateLiteralParts(token.value);
+    const expressions = parts.expressions.map((source) => parseTemplateExpressionSource(source));
+    return {
+      type: "TemplateLiteral",
+      quasis: parts.quasis.map((value) => ({ type: "Literal", value })),
+      expressions,
+      start: token.start,
+      end: token.end
+    };
+  }
+
   parseIdentifier() {
     const token = this.expect("identifier");
     return { type: "Identifier", name: token.value, start: token.start, end: token.end };
@@ -896,4 +946,105 @@ export function parse(source) {
   const parser = new Parser(tokens);
   const ast = parser.parseProgram();
   return { ast, tokens };
+}
+
+function parseTemplateExpressionSource(source) {
+  const exprSource = source.trim();
+  if (exprSource.length === 0) {
+    throw new SyntaxError("Template interpolation cannot be empty.");
+  }
+  const parser = new Parser(tokenize(exprSource));
+  const expression = parser.parseExpression();
+  if (!parser.match("eof")) {
+    const token = parser.current();
+    throw new SyntaxError(`Unexpected token in template expression: ${token.type}:${token.value}`);
+  }
+  return expression;
+}
+
+function splitTemplateLiteralParts(raw) {
+  const quasis = [];
+  const expressions = [];
+  let current = "";
+  let i = 0;
+
+  while (i < raw.length) {
+    const char = raw[i];
+
+    if (char === "\\") {
+      if (i + 1 < raw.length) {
+        current += raw[i + 1];
+        i += 2;
+      } else {
+        i += 1;
+      }
+      continue;
+    }
+
+    if (char === "$" && raw[i + 1] === "{") {
+      quasis.push(current);
+      current = "";
+      i += 2;
+      const { expressionSource, nextIndex } = readTemplateExpression(raw, i);
+      expressions.push(expressionSource);
+      i = nextIndex;
+      continue;
+    }
+
+    current += char;
+    i += 1;
+  }
+
+  quasis.push(current);
+  return { quasis, expressions };
+}
+
+function readTemplateExpression(raw, startIndex) {
+  let i = startIndex;
+  let depth = 1;
+  let quote = null;
+
+  while (i < raw.length) {
+    const char = raw[i];
+
+    if (quote) {
+      if (char === "\\") {
+        i += 2;
+        continue;
+      }
+      if (char === quote) {
+        quote = null;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (char === "'" || char === "\"" || char === "`") {
+      quote = char;
+      i += 1;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return {
+          expressionSource: raw.slice(startIndex, i),
+          nextIndex: i + 1
+        };
+      }
+      i += 1;
+      continue;
+    }
+
+    i += 1;
+  }
+
+  throw new SyntaxError("Unterminated template interpolation.");
 }

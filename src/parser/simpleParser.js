@@ -5,6 +5,9 @@ const KEYWORDS = new Set([
   "if",
   "else",
   "while",
+  "for",
+  "break",
+  "continue",
   "function",
   "return",
   "import",
@@ -19,7 +22,7 @@ const KEYWORDS = new Set([
 
 const PUNCTUATORS = new Set([";", ",", "(", ")", "{", "}", "."]);
 const SINGLE_CHAR_OPERATORS = new Set(["+", "-", "*", "/", "=", "<", ">", "!"]);
-const DOUBLE_CHAR_OPERATORS = new Set(["==", "!=", "<=", ">="]);
+const DOUBLE_CHAR_OPERATORS = new Set(["==", "!=", "<=", ">=", "=>", "&&", "||"]);
 
 function isWhitespace(char) {
   return char === " " || char === "\t" || char === "\n" || char === "\r";
@@ -154,6 +157,10 @@ class Parser {
     return this.tokens[this.cursor];
   }
 
+  tokenAt(offset = 0) {
+    return this.tokens[this.cursor + offset];
+  }
+
   consume() {
     const token = this.current();
     this.cursor += 1;
@@ -193,6 +200,9 @@ class Parser {
     if (this.match("keyword", "function")) return this.parseFunctionDeclaration();
     if (this.match("keyword", "if")) return this.parseIfStatement();
     if (this.match("keyword", "while")) return this.parseWhileStatement();
+    if (this.match("keyword", "for")) return this.parseForStatement();
+    if (this.match("keyword", "break")) return this.parseBreakStatement();
+    if (this.match("keyword", "continue")) return this.parseContinueStatement();
     if (this.match("keyword", "return")) return this.parseReturnStatement();
     if (this.match("keyword", "let") || this.match("keyword", "const") || this.match("keyword", "var")) {
       return this.parseVariableDeclaration();
@@ -319,6 +329,34 @@ class Parser {
   parseFunctionDeclaration() {
     const startToken = this.expect("keyword", "function");
     const id = this.parseIdentifier();
+    const { params, end } = this.parseFunctionSignature();
+    const body = this.parseBlockStatement();
+    return {
+      type: "FunctionDeclaration",
+      id,
+      params,
+      body,
+      start: startToken.start,
+      end: body.end || end
+    };
+  }
+
+  parseFunctionExpression() {
+    const startToken = this.expect("keyword", "function");
+    const id = this.match("identifier") ? this.parseIdentifier() : null;
+    const { params, end } = this.parseFunctionSignature();
+    const body = this.parseBlockStatement();
+    return {
+      type: "FunctionExpression",
+      id,
+      params,
+      body,
+      start: startToken.start,
+      end: body.end || end
+    };
+  }
+
+  parseFunctionSignature() {
     this.expect("punctuator", "(");
     const params = [];
     if (!this.match("punctuator", ")")) {
@@ -328,16 +366,8 @@ class Parser {
         this.consume();
       } while (true);
     }
-    this.expect("punctuator", ")");
-    const body = this.parseBlockStatement();
-    return {
-      type: "FunctionDeclaration",
-      id,
-      params,
-      body,
-      start: startToken.start,
-      end: body.end
-    };
+    const closeToken = this.expect("punctuator", ")");
+    return { params, end: closeToken.end };
   }
 
   parseIfStatement() {
@@ -376,6 +406,65 @@ class Parser {
     };
   }
 
+  parseForStatement() {
+    const startToken = this.expect("keyword", "for");
+    this.expect("punctuator", "(");
+
+    let init = null;
+    if (!this.match("punctuator", ";")) {
+      if (this.match("keyword", "let") || this.match("keyword", "const") || this.match("keyword", "var")) {
+        init = this.parseVariableDeclaration(false);
+      } else {
+        init = this.parseExpression();
+      }
+    }
+    this.expect("punctuator", ";");
+
+    let test = null;
+    if (!this.match("punctuator", ";")) {
+      test = this.parseExpression();
+    }
+    this.expect("punctuator", ";");
+
+    let update = null;
+    if (!this.match("punctuator", ")")) {
+      update = this.parseExpression();
+    }
+    this.expect("punctuator", ")");
+
+    const body = this.parseStatement();
+
+    return {
+      type: "ForStatement",
+      init,
+      test,
+      update,
+      body,
+      start: startToken.start,
+      end: body.end
+    };
+  }
+
+  parseBreakStatement() {
+    const token = this.expect("keyword", "break");
+    this.consumeSemicolon();
+    return {
+      type: "BreakStatement",
+      start: token.start,
+      end: token.end
+    };
+  }
+
+  parseContinueStatement() {
+    const token = this.expect("keyword", "continue");
+    this.consumeSemicolon();
+    return {
+      type: "ContinueStatement",
+      start: token.start,
+      end: token.end
+    };
+  }
+
   parseReturnStatement() {
     const startToken = this.expect("keyword", "return");
     let argument = null;
@@ -407,7 +496,7 @@ class Parser {
     };
   }
 
-  parseVariableDeclaration() {
+  parseVariableDeclaration(consumeSemicolon = true) {
     const kindToken = this.expect("keyword");
     const declarations = [];
 
@@ -418,12 +507,20 @@ class Parser {
         this.consume();
         init = this.parseExpression();
       }
-      declarations.push({ type: "VariableDeclarator", id, init, start: id.start, end: init ? init.end : id.end });
+      declarations.push({
+        type: "VariableDeclarator",
+        id,
+        init,
+        start: id.start,
+        end: init ? init.end : id.end
+      });
       if (!this.match("punctuator", ",")) break;
       this.consume();
     } while (true);
 
-    this.consumeSemicolon();
+    if (consumeSemicolon) {
+      this.consumeSemicolon();
+    }
 
     return {
       type: "VariableDeclaration",
@@ -450,9 +547,13 @@ class Parser {
   }
 
   parseAssignment() {
-    const left = this.parseEquality();
+    if (this.isArrowFunctionStart()) {
+      return this.parseArrowFunctionExpression();
+    }
+
+    const left = this.parseLogicalOr();
     if (this.match("operator", "=")) {
-      const op = this.consume();
+      this.consume();
       if (left.type !== "Identifier") {
         throw new SyntaxError("Assignment target must be an identifier.");
       }
@@ -467,6 +568,138 @@ class Parser {
       };
     }
     return left;
+  }
+
+  parseArrowFunctionExpression() {
+    const params = [];
+    let start;
+
+    if (this.match("identifier") && this.tokenAt(1)?.type === "operator" && this.tokenAt(1)?.value === "=>") {
+      const identifier = this.parseIdentifier();
+      params.push(identifier);
+      start = identifier.start;
+    } else {
+      const open = this.expect("punctuator", "(");
+      start = open.start;
+      if (!this.match("punctuator", ")")) {
+        do {
+          params.push(this.parseIdentifier());
+          if (!this.match("punctuator", ",")) break;
+          this.consume();
+        } while (true);
+      }
+      this.expect("punctuator", ")");
+    }
+
+    this.expect("operator", "=>");
+
+    let body;
+    let expression = false;
+    if (this.match("punctuator", "{")) {
+      body = this.parseBlockStatement();
+    } else {
+      body = this.parseAssignment();
+      expression = true;
+    }
+
+    return {
+      type: "ArrowFunctionExpression",
+      params,
+      body,
+      expression,
+      start,
+      end: body.end
+    };
+  }
+
+  isArrowFunctionStart() {
+    if (this.match("identifier")) {
+      const next = this.tokenAt(1);
+      return next?.type === "operator" && next.value === "=>";
+    }
+
+    if (!this.match("punctuator", "(")) {
+      return false;
+    }
+
+    let depth = 0;
+    let i = this.cursor;
+    let validParams = true;
+
+    while (i < this.tokens.length) {
+      const token = this.tokens[i];
+
+      if (token.type === "punctuator" && token.value === "(") {
+        depth += 1;
+        i += 1;
+        continue;
+      }
+
+      if (token.type === "punctuator" && token.value === ")") {
+        depth -= 1;
+        i += 1;
+        if (depth === 0) break;
+        continue;
+      }
+
+      if (depth > 1) {
+        validParams = false;
+        break;
+      }
+
+      if (depth === 1) {
+        const isAllowed =
+          token.type === "identifier" ||
+          (token.type === "punctuator" && token.value === ",");
+        if (!isAllowed) {
+          validParams = false;
+          break;
+        }
+      }
+
+      i += 1;
+    }
+
+    if (!validParams || depth !== 0) {
+      return false;
+    }
+
+    const next = this.tokens[i];
+    return next?.type === "operator" && next.value === "=>";
+  }
+
+  parseLogicalOr() {
+    let node = this.parseLogicalAnd();
+    while (this.match("operator", "||")) {
+      const op = this.consume();
+      const right = this.parseLogicalAnd();
+      node = {
+        type: "LogicalExpression",
+        operator: op.value,
+        left: node,
+        right,
+        start: node.start,
+        end: right.end
+      };
+    }
+    return node;
+  }
+
+  parseLogicalAnd() {
+    let node = this.parseEquality();
+    while (this.match("operator", "&&")) {
+      const op = this.consume();
+      const right = this.parseEquality();
+      node = {
+        type: "LogicalExpression",
+        operator: op.value,
+        left: node,
+        right,
+        start: node.start,
+        end: right.end
+      };
+    }
+    return node;
   }
 
   parseEquality() {
@@ -561,7 +794,7 @@ class Parser {
     let node = this.parsePrimary();
     while (true) {
       if (this.match("punctuator", ".")) {
-        const dot = this.consume();
+        this.consume();
         const property = this.parseIdentifier();
         node = {
           type: "MemberExpression",
@@ -574,7 +807,7 @@ class Parser {
       }
 
       if (this.match("punctuator", "(")) {
-        const openParen = this.consume();
+        this.consume();
         const args = [];
         if (!this.match("punctuator", ")")) {
           do {
@@ -591,9 +824,6 @@ class Parser {
           start: node.start,
           end: closeParen.end
         };
-        if (openParen && closeParen) {
-          // no-op to keep lint happy without dependency on formatter
-        }
         continue;
       }
 
@@ -618,6 +848,10 @@ class Parser {
       const token = this.consume();
       const value = token.value === "true" ? true : token.value === "false" ? false : null;
       return { type: "Literal", value, start: token.start, end: token.end };
+    }
+
+    if (this.match("keyword", "function")) {
+      return this.parseFunctionExpression();
     }
 
     if (this.match("identifier")) {

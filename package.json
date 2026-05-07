@@ -1,0 +1,13 @@
+{
+  "name": "v16-engine",
+  "version": "0.1.0",
+  "description": "V16 JavaScript execution engine prototype",
+  "type": "module",
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

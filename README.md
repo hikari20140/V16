@@ -50,7 +50,7 @@ V16 is a JavaScript execution engine prototype with this pipeline:
   - `--input-file <file>`
   - `--debug`
 
-See [v16-api-document](/Users/tomonori/Documents/GitHub/V16/v16-api.document.md) for details.
+See [v16-api-document](./v16-api.document.md) for details.
 
 ## Quick Start
 

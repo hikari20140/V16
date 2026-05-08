@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { V16Engine } from "./engine/V16Engine.js";
 import { createV16DocumentAPI } from "./v16-api/document.js";
+import { createV16AirAPI } from "./v16-api/air.js";
 
 async function main() {
   const options = await parseCli(process.argv.slice(2));
@@ -17,6 +18,7 @@ async function main() {
       ].join("\n");
 
   const documentApi = createV16DocumentAPI(options.documentHtml ?? null);
+  const airApi = createV16AirAPI(options.airJson ?? null);
   const globals = {
     input: options.input,
     document: {
@@ -26,7 +28,25 @@ async function main() {
       textIncludes: (text) => documentApi.textIncludes(text),
       findByTag: (tag) => documentApi.findByTag(tag)
     },
-    v16doc: documentApi
+    v16doc: documentApi,
+    air: {
+      hasAir: () => airApi.hasAir(),
+      getVersion: () => airApi.getVersion(),
+      getRootIndex: () => airApi.getRootIndex(),
+      getNode: (index) => airApi.getNode(index),
+      getByTag: (tag) => airApi.getByTag(tag),
+      getById: (id) => airApi.getById(id),
+      childrenOf: (index) => airApi.childrenOf(index),
+      parentOf: (index) => airApi.parentOf(index),
+      setId: (index, id) => airApi.setId(index, id),
+      addClass: (index, className) => airApi.addClass(index, className),
+      removeClass: (index, className) => airApi.removeClass(index, className),
+      hasClass: (index, className) => airApi.hasClass(index, className),
+      renameTag: (index, tag) => airApi.renameTag(index, tag),
+      toJSON: () => airApi.toJSON(),
+      serialize: () => airApi.serialize()
+    },
+    v16air: airApi
   };
 
   const engine = new V16Engine();
@@ -50,6 +70,7 @@ async function parseCli(argv) {
     scriptPath: null,
     debug: false,
     documentHtml: null,
+    airJson: null,
     input: null
   };
 
@@ -67,6 +88,15 @@ async function parseCli(argv) {
       const filePath = argv[i + 1];
       if (!filePath) throw new Error("--html requires a file path.");
       options.documentHtml = await readFile(resolve(filePath), "utf8");
+      i += 2;
+      continue;
+    }
+
+    if (token === "--air-json") {
+      const filePath = argv[i + 1];
+      if (!filePath) throw new Error("--air-json requires a file path.");
+      const raw = await readFile(resolve(filePath), "utf8");
+      options.airJson = JSON.parse(raw);
       i += 2;
       continue;
     }

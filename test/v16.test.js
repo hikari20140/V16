@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { V16Engine } from "../src/engine/V16Engine.js";
+import { createV16AirAPI } from "../src/v16-api/air.js";
 
 test("V16 executes arithmetic, assignment, and print pipeline", async () => {
   const logs = [];
@@ -177,4 +178,69 @@ test("V16 applies tree-guided LICM and block CSE stats", async () => {
 
   assert.equal(result.stages.jit.optimizations.blockCseReuses > 0, true);
   assert.equal(result.stages.jit.optimizations.licmHoists > 0, true);
+});
+
+test("v16-api.air manipulates AirDOM json subset", () => {
+  const api = createV16AirAPI({
+    version: "air-jsobj/1",
+    root: 0,
+    nodes: [
+      { index: 0, tag: "#document", parent: null, child: [1], id: null, class: [] },
+      { index: 1, tag: "body", parent: 0, child: [2], id: "main", class: ["root"] },
+      { index: 2, tag: "div", parent: 1, child: [], id: "target", class: [] }
+    ]
+  });
+
+  assert.equal(api.getRootIndex(), 0);
+  assert.equal(api.getByTag("div").length, 1);
+  assert.equal(api.getById("main").tag, "body");
+  assert.equal(api.childrenOf(1).length, 1);
+  assert.equal(api.parentOf(2).index, 1);
+
+  assert.equal(api.addClass(2, "active"), true);
+  assert.equal(api.hasClass(2, "active"), true);
+  assert.equal(api.setId(2, "new-id"), true);
+  assert.equal(api.getNode(2).id, "new-id");
+  assert.equal(api.renameTag(2, "section"), true);
+  assert.equal(api.getNode(2).tag, "section");
+
+  const serialized = api.serialize();
+  assert.equal(typeof serialized, "string");
+  assert.equal(JSON.parse(serialized).nodes[2].tag, "section");
+});
+
+test("V16 script can operate air api globals", async () => {
+  const logs = [];
+  const engine = new V16Engine();
+  const airApi = createV16AirAPI({
+    version: "air-jsobj/1",
+    root: 0,
+    nodes: [
+      { index: 0, tag: "#document", parent: null, child: [1], id: null, class: [] },
+      { index: 1, tag: "body", parent: 0, child: [2, 3], id: null, class: [] },
+      { index: 2, tag: "p", parent: 1, child: [], id: "time", class: [] },
+      { index: 3, tag: "div", parent: 1, child: [], id: "list", class: [] }
+    ]
+  });
+
+  const source = [
+    "print(air.getByTag('div').length);",
+    "air.addClass(3, 'active');",
+    "print(air.hasClass(3, 'active'));",
+    "print(air.getById('time').tag);"
+  ].join("\n");
+
+  await engine.execute(source, {
+    globals: {
+      air: {
+        getByTag: (tag) => airApi.getByTag(tag),
+        addClass: (index, className) => airApi.addClass(index, className),
+        hasClass: (index, className) => airApi.hasClass(index, className),
+        getById: (id) => airApi.getById(id)
+      }
+    },
+    logger: (...args) => logs.push(args)
+  });
+
+  assert.deepEqual(logs, [[1], [true], ["p"]]);
 });

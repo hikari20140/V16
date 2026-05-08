@@ -1,0 +1,126 @@
+{
+  "version": "air-jsobj/1",
+  "root": 0,
+  "nodes": [
+    {
+      "index": 0,
+      "tag": "#document",
+      "parent": null,
+      "child": [
+        1
+      ],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 1,
+      "tag": "html",
+      "parent": 0,
+      "child": [
+        2,
+        7
+      ],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 2,
+      "tag": "head",
+      "parent": 1,
+      "child": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 3,
+      "tag": "meta",
+      "parent": 2,
+      "child": [],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 4,
+      "tag": "meta",
+      "parent": 2,
+      "child": [],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 5,
+      "tag": "title",
+      "parent": 2,
+      "child": [],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 6,
+      "tag": "style",
+      "parent": 2,
+      "child": [],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 7,
+      "tag": "body",
+      "parent": 1,
+      "child": [
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 8,
+      "tag": "h1",
+      "parent": 7,
+      "child": [],
+      "id": null,
+      "class": []
+    },
+    {
+      "index": 9,
+      "tag": "p",
+      "parent": 7,
+      "child": [],
+      "id": "time",
+      "class": []
+    },
+    {
+      "index": 10,
+      "tag": "button",
+      "parent": 7,
+      "child": [],
+      "id": "addItem",
+      "class": []
+    },
+    {
+      "index": 11,
+      "tag": "div",
+      "parent": 7,
+      "child": [],
+      "id": "list",
+      "class": []
+    },
+    {
+      "index": 12,
+      "tag": "script",
+      "parent": 7,
+      "child": [],
+      "id": null,
+      "class": []
+    }
+  ]
+}

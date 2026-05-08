@@ -44,8 +44,11 @@ V16 is a JavaScript execution engine prototype with this pipeline:
   - `input`
   - `document`
   - `v16doc`
+  - `air`
+  - `v16air`
 - Options:
   - `--html <file>`
+  - `--air-json <file>`
   - `--input-json '<json>'`
   - `--input-file <file>`
   - `--debug`
